@@ -1,0 +1,1880 @@
+### Created by JSS June 2021 
+
+###This code runs and executes the analyses conducted in Suissa and Friedman 2021: *input doi*
+
+### Install and load all libraries for downstream analyses
+install.packages(tidyverse)
+install.packages(phytools)
+install.packages(ape)
+install.packages(geiger)
+install.packages(corHMM)
+install.packages(coda)
+install.packages(devtools)
+install.packages(caper)
+install.packages(vegan)
+install.packages(picante)
+install.packages(phangorn)
+install.packages(PHYLOGR)
+install.packages(phylobase)
+install.packages(brew)
+install.packages(ggfortify)
+install.packages(factoextra)
+install.packages(anchors)
+install.packages(cluster)
+install.packages(factoextra)
+install.packages(FactoMineR)
+install.packages(fpc)
+install.packages(RColorBrewer)
+library(tidyverse)
+library(phytools)
+library(ape)
+library(geiger)
+library(corHMM)
+library(coda)
+library(devtools)
+library(caper)
+library(vegan)
+library(picante)
+library(phangorn)
+library(PHYLOGR)
+library(phylobase)
+library(brew)
+library(ggfortify)
+library(factoextra)
+library(anchors)
+library(cluster)
+library(factoextra)
+library(FactoMineR)
+library(fpc)
+library(RColorBrewer)
+
+###########################              ########################### 
+########################### NEXT Section ###########################
+###########################              ########################### 
+
+### This section reproduces the phylogenetic principal components analysis.
+
+#############
+#Read in the Data
+#############
+data_stele<- read.csv("quant_stele_dat.csv", header = TRUE, row.names = 3)
+
+
+
+#############
+#subset the data
+#############
+df <- data_stele%>%
+  dplyr::select(sumRelativeArea_stele,	avgSolidity,	avgOrientation,	avgFormFactor,	avgExtent,	avgEccentricity,	avgCompactness,	bundleNum,	bundleAreaRange,	bundleEccentricityRange,	bundleOrientationRange,	bundleContribution,	bundleEccentricityStdev,	bundleFormFactorStdev,bundleFormFactorRange,	bundleOrientationStdev,	Math_RelativePithArea,	relPithToSteleArea, Polycyclic)
+
+
+# bring in tree
+tree<- read.tree("4k_tree.tre")
+
+tree$tip.label <- gsub("_", " ", tree$tip.label) 
+
+# check names in tree and in dataframe
+chk<-name.check(tree,df)
+summary(chk)
+
+#check which are in data nand not tree
+chk$data_not_tree
+
+# now prune the tre based on the data available
+tree.pruned<-drop.tip(tree,chk$tree_not_data)
+fern.Data.pruned<-df[!(rownames(df)%in%
+                         chk$data_not_tree),,drop=FALSE]
+
+
+total_fern_dat_pruned<-data_stele[!(rownames(data_stele)%in%
+                                      chk$data_not_tree),,drop=FALSE]
+
+#Run phylo pca
+stelePhyPCA<- phyl.pca(tree.pruned,fern.Data.pruned, method = "lambda", mode = "corr")
+
+#generate the variance explained by each PC
+diag(stelePhyPCA$Eval)/sum(stelePhyPCA$Eval)*100
+
+# run a phylomorphospace without colors
+phylomorphospace(X = stelePhyPCA$S[,1:2], tree = tree.pruned, label = "off", control=list(lwd=2), node.size=c(0.001,1.3))
+
+# if you desire, plot in 3D space
+obj<-phylomorphospace3d(X = stelePhyPCA$S[,3:1], tree = tree.pruned, method="static",angle=-20, control=list(lwd=1, ftype = "off"))
+
+
+### Use the phylo PCA loadings int he HCPC clustering
+stele_ppCA<-as.data.frame(scores(stelePhyPCA)[,1:13]) #scores() function may need to be downloaded from github https://github.com/liamrevell/phytools/commit/bb71dab53f8d0d5b466eceda5e3bba9c50520e77
+
+
+
+# Compute hierarchical clustering on principal components
+res.phcpc <- HCPC(stele_ppCA, graph = FALSE, kk = Inf, nb.clust = -1, iter.max = 100, min=5, max=20, consol = TRUE, graph.scale="inertia", method="ward",metric = "euclidean")
+
+####################
+###set the colors 
+####################
+fern.colors.dat.pruned<-data_stele[!(rownames(data_stele)%in%
+                                       chk$data_not_tree),,drop=FALSE]
+
+tip.colours<-setNames(c("darkred","navajowhite4",  "goldenrod", "coral","darkblue" , "green4", "purple", "maroon"),sort(unique(unique(fern.colors.dat.pruned$steleType))))
+
+
+tip.cols.df<-as.data.frame(tip.colours)
+
+tip.cols.df<-tip.cols.df%>%
+  dplyr::mutate(steleType= rownames(tip.cols.df))
+
+data_stele.cols<-fern.colors.dat.pruned%>%
+  mutate(species=rownames(fern.colors.dat.pruned))
+
+cols<-left_join(data_stele.cols, tip.cols.df, by="steleType") 
+
+cols<- cols%>%
+  dplyr::select(species, tip.colours)
+
+##Order the tip labels by their order number in the clustering tree
+labs<- as.data.frame(res.phcpc$call$t$tree$labels)
+
+labs<-labs%>%
+  rownames_to_column()%>%
+  mutate(species= labs$`res.phcpc$call$t$tree$labels`)%>%
+  dplyr::select(rowname, species)
+
+#order the labels by the order in the tree file
+labs.ord<-labs[ order(match(labs$rowname, as.character(res.phcpc$call$t$tree$order))), ]
+
+
+### order colors by rownames(res.hcpc$data.clust)
+cols.ord<-cols[ order(match(cols$species, as.character(labs.ord$species))), ]
+
+
+cols.vec <- as.vector(as.character(cols.ord[,2]))
+
+
+###To visualize the dendrogram generated by the hierarchical clustering, we’ll use the function fviz_dend()
+fviz_dend(res.phcpc, 
+          cex = 0.4,                     # Label size
+          lwd=0.8,
+          palette = "jco",               # Color palette see ?ggpubr::ggpar
+          rect = TRUE, rect_fill = FALSE, # Add rectangle around groups
+          rect_border = "jco",           # Rectangle color      
+          show_labels=TRUE,
+          #label_cols= cols.vec,
+          main = "Stelar clustering",
+          xlab = "Species")
+
+### Once HCPC clusters are created and the number of quantitative groups are determined, go back and color colors to phylomorhospace
+tip.colours<-setNames(c("navajowhite4", "goldenrod" , "green4","darkblue","purple" ),sort(unique(total_fern_dat_pruned$HC_stele_state)))
+
+
+tip.cols.df<-as.data.frame(tip.colours)
+
+tip.cols.df<-tip.cols.df%>%
+  dplyr::mutate(HC_stele_state= rownames(tip.cols.df))
+
+total_fern_dat_pruned<-total_fern_dat_pruned%>%
+  mutate(species=rownames(total_fern_dat_pruned))
+
+cols<-left_join(total_fern_dat_pruned, tip.cols.df, by="HC_stele_state") 
+
+cols<- cols%>%
+  dplyr::select(species, tip.colours)
+
+
+colsSet<-setNames(as.character(cols[,2]), cols$species)
+
+tip.cols<-c(colsSet[tree.pruned$tip.label], rep("NA",tree.pruned$Nnode))
+
+names(tip.cols)<-1:(length(tree.pruned$tip)+tree.pruned$Nnode)
+
+
+
+### Plot the phylo morphospace 
+#1/2
+phylomorphospace(X = stelePhyPCA$S[,2:1], tree = tree.pruned, label = "off", control=list(col.node=tip.cols,lwd=3.5), node.size=c(0.001,2))+
+  add.simmap.legend(colors=tip.colours,x=105,y=-30,vertical=TRUE,prompt=FALSE, fsize=0.7)
+
+# 2/3
+phylomorphospace(X = stelePhyPCA$S[,2:3], tree = tree.pruned, label = "off", control=list(col.node=tip.cols, lwd=2), node.size=c(0.001,2))+
+  add.simmap.legend(colors=tip.colours,x=105,y=-30,vertical=TRUE,prompt=FALSE, fsize=0.7)
+
+
+###########################              ########################### 
+########################### NEXT Section ###########################
+###########################              ########################### 
+
+#################
+#Run models of stelar evolution
+#################
+
+
+####################################
+# fit a series of models with five states and one polymorphic form 
+####################################
+
+###bring int tree
+fern.tree <- read.tree(file = "4k_tree.tre")
+
+
+###bring in dataframe
+fern.data <- read.csv("stele_data.csv",header = TRUE, row.names=1)
+
+
+# select only data on stelar morphology reduced
+stele.data<- fern.data%>%
+  select(HC_reduced_states)%>%
+  na.omit()
+
+###change the names in stele.data$HC_reduced_states to A B C D E
+
+stele.data$HC_reduced_states<- str_replace_all(stele.data$HC_reduced_states, "Protostele", "A")
+
+stele.data$HC_reduced_states<- str_replace_all(stele.data$HC_reduced_states, "Solenostele", "B")
+
+stele.data$HC_reduced_states<- str_replace_all(stele.data$HC_reduced_states, "SolenoDictyostele", "C")
+
+stele.data$HC_reduced_states<- str_replace_all(stele.data$HC_reduced_states, "Dictyostele", "D")
+
+stele.data$HC_reduced_states<- str_replace_all(stele.data$HC_reduced_states, "Polycyclic", "E")
+
+stele.data$HC_reduced_states<- str_replace_all(stele.data$HC_reduced_states, "Perforated_dictyostele", "F")
+
+# order the dataset by A-E
+stele.data<- stele.data[order(stele.data$HC_reduced_states), , drop=FALSE]
+
+
+###check species in tree
+chk<-name.check(fern.tree,stele.data)
+
+###now prune the tre based on the data available
+tree.pruned<-drop.tip(fern.tree,chk$tree_not_data)
+fern.Data.pruned<-stele.data[!(rownames(stele.data)%in%
+                                 chk$data_not_tree),,drop=FALSE]
+
+
+stele.mode<-setNames(fern.Data.pruned[,1],rownames(fern.Data.pruned))
+
+
+##############
+#fit models of stelar evolution to the data. All of these models treat soleno-dictyosteles as polymorphic
+##############
+
+###Fit SYM model
+SYM.unordered_6state<-fitMk(tree.pruned,stele.mode,model="SYM", pi=c(1, 0, 0, 0, 0,0))
+
+###Fit ARD model
+ard.unordered_6state<-fitMk(tree.pruned,stele.mode,model="ARD", pi=c(1, 0, 0, 0, 0,0))
+
+###Fit ER model
+er.unordered_6state<-fitMk(tree.pruned,stele.mode,model="ER", pi=c(1, 0, 0, 0, 0,0))
+
+
+###Create custom matrixes 1
+ard.unord.more.rate<-matrix(c(
+  0,1,2,3,4,0,
+  5,0,6,7,8,9,
+  10,11,0,12,13,14,
+  15,16,17,0,18,19,
+  20,21,22,23,0,0,
+  0,24,25,26,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+### fit the model
+fitard.unord.more.rate_6state<-fitMk(tree.pruned,stele.mode,
+                                     model=ard.unord.more.rate,surpressWarnings=TRUE, pi=c(1, 0, 0, 0, 0,0))
+
+
+###Create custom matrixes 2
+ard.unord.even.more.rate<-matrix(c(
+  0,1,2,3,4,0,
+  5,0,6,7,8,9,
+  10,11,0,12,13,14,
+  15,16,17,0,18,19,
+  20,21,22,23,0,27,
+  0,24,25,26,28,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+
+# fit the model
+fitard.ard.unord.even.more.rate_6state<-fitMk(tree.pruned,stele.mode,
+                                              model=ard.unord.even.more.rate,surpressWarnings=TRUE, pi=c(1, 0, 0, 0, 0,0))
+
+
+###Create custom matrixes 3
+ard.ord<-matrix(c(
+  0,1,0,0,0,0,
+  2,0,3,0,0,0,
+  0,4,0,5,0,0,
+  0,0,6,0,7,8,
+  0,0,0,9,0,10,
+  0,0,0,11,12,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+###fit the model
+fitArd.ord_6state<-fitMk(tree.pruned,stele.mode,
+                         model=ard.ord,surpressWarnings=TRUE, pi=c(1, 0, 0, 0, 0,0))
+
+
+
+####Create custom matrixes 4
+SYM.trans.ordered<-matrix(c(
+  0,1,0,0,0,0,
+  1,0,2,0,0,0,
+  0,2,0,3,0,0,
+  0,0,3,0,4,5,
+  0,0,0,4,0,6,
+  0,0,0,5,6,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+# fit the model
+fitsym.trans.ordered_6state<-fitMk(tree.pruned,stele.mode,
+                                   model=SYM.trans.ordered,surpressWarnings=TRUE, pi=c(1, 0, 0, 0, 0,0))
+
+####Create custom matrixes 5
+SYM.trans.more<-matrix(c(
+  0,1,13,2,14,0,
+  1,0,3,4,5,6,
+  13,3,0,7,8,9,
+  2,4,7,0,10,11,
+  14,5,8,10,0,12,
+  0,6,7,11,12,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+# fit the model
+fitsym.trans.more_6state<-fitMk(tree.pruned,stele.mode,
+                                model=SYM.trans.more,surpressWarnings=TRUE, pi=c(1, 0, 0, 0, 0,0))
+
+###Create custom matrixes 6
+ard_best_fit_mat<-matrix(c(
+  0,1,0,0,0,0,
+  19,0,2,3,4,0,
+  8,5,0,6,7,0,
+  0,9,10,0,11,12,
+  0,13,14,15,0,0,
+  0,16,17,18,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+# fit the model
+fit_ard_best_fit_mat_6state<-fitMk(tree.pruned,stele.mode,
+                                   model=ard_best_fit_mat,surpressWarnings=TRUE, pi=c(1, 0, 0, 0, 0, 0))
+
+
+##################
+#Compare all the simple MKmodels
+##################
+
+
+###estimate AIC values
+aic<-c(AIC(fitard.unord.more.rate_6state),
+       AIC(SYM.unordered_6state),
+       AIC(ard.unordered_6state),
+       AIC(er.unordered_6state),
+       AIC(fitard.ard.unord.even.more.rate_6state),
+       AIC(fitArd.ord_6state),
+       AIC(fitsym.trans.ordered_6state),
+       AIC(fitsym.trans.more_6state),
+       AIC(fit_ard_best_fit_mat_6state))
+
+model.fit<-data.frame(model=c("fitard.unord.more.rate_6state",
+                              "SYM.unordered_6state",
+                              "ard.unordered_6state",
+                              "er.unordered_6state",
+                              "fitard.ard.unord.even.more.rate_6state",
+                              "fitArd.ord_6state",
+                              "fitsym.trans.ordered_6state",
+                              "fitsym.trans.more_6state",
+                              "fit_ard_best_fit_mat_6state"),
+                      logL=c(logLik(fitard.unord.more.rate_6state),
+                             logLik(SYM.unordered_6state),
+                             logLik(ard.unordered_6state),
+                             logLik(er.unordered_6state),
+                             logLik(fitard.ard.unord.even.more.rate_6state),
+                             logLik(fitArd.ord_6state),
+                             logLik(fitsym.trans.ordered_6state),
+                             logLik(fitsym.trans.more_6state),
+                             logLik(fit_ard_best_fit_mat_6state)),
+                      
+                      AIC=aic,delta.AIC=aic-min(aic))
+
+### arrange the models according to their delta AIC
+model.fit<- model.fit%>%
+  arrange(delta.AIC)
+
+
+#############################################
+#Plot all the models
+#############################################
+
+
+###########
+#Multiply all rates for all models by 50, so rates will be in terms of transitions per 50 million years
+###########
+
+fitard.unord.more.rate_6state$rates <-fitard.unord.more.rate_6state$rates*50
+SYM.unordered_6state$rates<- SYM.unordered_6state$rates*50
+ard.unordered_6state$rates<- ard.unordered_6state$rates*50
+er.unordered_6state$rates<- er.unordered_6state$rates*50
+fitard.ard.unord.even.more.rate_6state$rates<- fitard.ard.unord.even.more.rate_6state$rates*50
+fitArd.ord_6state$rates <- fitArd.ord_6state$rates*50
+fitsym.trans.ordered_6state$rates  <- fitsym.trans.ordered_6state$rates*50
+fitsym.trans.more_6state$rates <- fitsym.trans.more_6state$rates*50
+fit_ard_best_fit_mat_6state$rates <- fit_ard_best_fit_mat_6state$rates*50
+
+model.fit
+
+#### Plot
+par(fg=make.transparent("blue",0.8), mfrow=c(3,3), mar=c(1,1,1,1))
+
+  plot.fitMk(fit_ard_best_fit_mat_6state, cex.traits= .9, show.zeros=FALSE, lwd=2, main= "delta.AIC: 0.00") +
+  plot.fitMk(fitard.unord.more.rate_6state, cex.traits= .9, show.zeros=FALSE, lwd=2, main="delta.AIC: 14.00" )+ 
+  plot.fitMk(fitard.ard.unord.even.more.rate_6state , cex.traits=.9, show.zeros=FALSE, lwd=2, main= "delta.AIC: 18.00")+
+  plot.fitMk(ard.unordered_6state, cex.traits=.9 , show.zeros=FALSE, lwd=2, main = "delta.AIC: 22.00")+
+  plot.fitMk(fitsym.trans.more_6state, cex.traits= .9, show.zeros=FALSE, lwd=2, main ="delta.AIC: 66.77" )+
+  plot.fitMk(SYM.unordered_6state, cex.traits= .9, show.zeros=FALSE, lwd=2, main= "delta.AIC: 77.80")+
+  plot.fitMk(er.unordered_6state, cex.traits= .9, show.zeros=FALSE, lwd=2, main= "delta.AIC: 169.19")+
+  plot.fitMk(fitArd.ord_6state, cex.traits= .9, show.zeros=FALSE, lwd=2, main= "delta.AIC: 235.13")+
+  plot.fitMk(fitsym.trans.ordered_6state, cex.traits=.9, show.zeros=FALSE, lwd=2, main="delta.AIC: 294.49" )
+
+
+
+
+###########################              ########################### 
+########################### NEXT Section ###########################
+###########################              ########################### 
+  
+
+#############################
+#Test for rate heterogeneity using CorHMM
+#############################
+
+############
+#Make the data frame in the correct format for corhmm
+###########
+fern.corhmm.dat<- read.csv("stele_data.csv", header = TRUE, stringsAsFactors = FALSE, row.names = 1)
+
+###subset the data
+corhmm_dat<-fern.corhmm.dat%>%
+  dplyr::select("HC_reduced_states")%>%
+  na.omit()
+
+### Replace all states with letters
+corhmm_dat$HC_reduced_states<- str_replace_all(corhmm_dat$HC_reduced_states, "Protostele", "A")
+
+corhmm_dat$HC_reduced_states<- str_replace_all(corhmm_dat$HC_reduced_states, "Solenostele", "B")
+
+corhmm_dat$HC_reduced_states<- str_replace_all(corhmm_dat$HC_reduced_states, "SolenoDictyostele", "C")
+
+corhmm_dat$HC_reduced_states<- str_replace_all(corhmm_dat$HC_reduced_states, "Dictyostele", "D")
+
+corhmm_dat$HC_reduced_states<- str_replace_all(corhmm_dat$HC_reduced_states, "Polycyclic", "E")
+
+corhmm_dat$HC_reduced_states<- str_replace_all(corhmm_dat$HC_reduced_states, "Perforated_dictyostele", "F")
+
+###Read in the tree 
+fern.tre<- read.tree("4k_tree.tre")
+
+############
+# check species in tree
+############
+chk<-name.check(fern.tre,corhmm_dat)
+summary(chk)
+
+############
+#check which are in data nand not tree
+############
+chk$data_not_tree
+
+############
+# now prune the tre based on the data available
+############
+tree.pruned<-drop.tip(fern.tre,chk$tree_not_data)
+corhmm_dat.pruned<-corhmm_dat[!(rownames(corhmm_dat)%in%
+                                  chk$data_not_tree),,drop=FALSE]
+
+
+############
+#get data in right format
+############
+corhmm_ready.dat <- corhmm_dat.pruned%>%
+  rownames_to_column(., var = "species")
+
+##################
+#ER/ER
+##################
+
+# ER ER
+ER<-matrix(c(
+  0,1,1,1,1,0,
+  1,0,1,1,1,1,
+  1,1,0,1,1,1,
+  1,1,1,0,1,1,
+  1,1,1,1,0,0,
+  0,1,1,1,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+ER_2<-matrix(c(
+  0,2,2,2,2,0,
+  2,0,2,2,2,2,
+  2,2,0,2,2,2,
+  2,2,2,0,2,2,
+  2,2,2,2,0,0,
+  0,2,2,2,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+StateMats <- list(ER, ER_2) 
+
+StateMats
+
+RateClassMat <- getRateCatMat(2) 
+
+
+full_mat_ER_ER_6state<-getFullMat(StateMats, RateClassMat)
+
+
+corHMM_output_R2_full_mat_ER_ER_6state <- corHMM(phy = tree.pruned, data = corhmm_ready.dat, rate.cat = 2, rate.mat =full_mat_ER_ER_6state, node.states = "marginal", fixed.nodes=FALSE, get.tip.states =TRUE, root.p=c(1,0,0,0,0,0,1,0,0,0,0,0))
+
+
+############
+# ER ER semirestricted
+############
+ER<-matrix(c(
+  0,1,0,0,0,0,
+  1,0,1,1,1,0,
+  1,1,0,1,1,0,
+  0,1,1,0,1,1,
+  0,1,1,1,0,0,
+  0,1,1,1,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+ER_2<-matrix(c(
+  0,1,0,0,0,0,
+  1,0,1,1,1,0,
+  1,1,0,1,1,0,
+  0,1,1,0,1,1,
+  0,1,1,1,0,0,
+  0,1,1,1,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+
+StateMats <- list(ER, ER_2) 
+
+StateMats
+
+RateClassMat <- getRateCatMat(2) 
+
+
+full_mat_ER_ER_6state_restricted<-getFullMat(StateMats, RateClassMat)
+
+
+corHMM_output_R2_full_mat_ER_ER_6state_semirestricted <- corHMM(phy = tree.pruned, data = corhmm_ready.dat, rate.cat = 2, rate.mat =full_mat_ER_ER_6state_restricted, node.states = "marginal", fixed.nodes=FALSE, get.tip.states =TRUE, root.p=c(1,0,0,0,0,0,1,0,0,0,0,0))
+
+
+##################
+#SYM/SYM 
+##################
+
+
+# SYM SYM
+SYM<-matrix(c(
+  0,1,2,3,4,0,
+  1,0,5,6,7,8,
+  2,5,0,9,10,11,
+  3,6,9,0,12,13,
+  4,7,10,12,0,0,
+  0,8,11,13,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+SYM_2<-matrix(c(
+  0,1,2,3,4,0,
+  1,0,5,6,7,8,
+  2,5,0,9,10,11,
+  3,6,9,0,12,13,
+  4,7,10,12,0,0,
+  0,8,11,13,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+StateMats <- list(SYM, SYM_2) 
+
+StateMats
+
+RateClassMat <- getRateCatMat(2) 
+
+
+full_mat_SYM_SYM_6state<-getFullMat(StateMats, RateClassMat)
+
+
+corHMM_output_R2_full_mat_SYM_SYM_6state <- corHMM(phy = tree.pruned, data = corhmm_ready.dat, rate.cat = 2, rate.mat =full_mat_SYM_SYM_6state, node.states = "marginal", fixed.nodes=FALSE, get.tip.states =TRUE, root.p=c(1,0,0,0,0,0,1,0,0,0,0,0))
+
+
+##################
+#SYM/SYM  semirestricted
+##################
+
+### SYM SYM
+SYM<-matrix(c(
+  0,1,0,0,0,0,
+  1,0,5,6,7,0,
+  2,5,0,9,10,0,
+  0,6,9,0,12,13,
+  0,7,10,12,0,0,
+  0,8,11,13,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+SYM_2<-matrix(c(
+  0,1,0,0,0,0,
+  1,0,5,6,7,0,
+  2,5,0,9,10,0,
+  0,6,9,0,12,13,
+  0,7,10,12,0,0,
+  0,8,11,13,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+StateMats <- list(SYM, SYM_2) 
+
+StateMats
+
+RateClassMat <- getRateCatMat(2) 
+
+
+full_mat_SYM_SYM_6state_restricted<-getFullMat(StateMats, RateClassMat)
+
+
+corHMM_output_R2_full_mat_SYM_SYM_6state_semirestricted <- corHMM(phy = tree.pruned, data = corhmm_ready.dat, rate.cat = 2, rate.mat =full_mat_SYM_SYM_6state_restricted, node.states = "marginal", fixed.nodes=FALSE, get.tip.states =TRUE, root.p=c(1,0,0,0,0,0,1,0,0,0,0,0))
+
+
+###################################################################
+
+########################
+# ER ARD
+########################
+
+### ER ARD
+ER<-matrix(c(
+  0,1,1,1,1,0,
+  1,0,1,1,1,1,
+  1,1,0,1,1,1,
+  1,1,1,0,1,1,
+  1,1,1,1,0,0,
+  0,1,1,1,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+ARD_2<-matrix(c(
+  0,1,2,3,4,0,
+  5,0,6,7,8,9,
+  10,11,0,12,13,14,
+  15,16,17,0,18,19,
+  20,21,22,23,0,0,
+  0,24,25,26,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+StateMats <- list(ER, ARD_2) 
+
+StateMats
+
+RateClassMat <- getRateCatMat(2) 
+
+
+full_mat_ER_ARD_6state<-getFullMat(StateMats, RateClassMat)
+
+
+corHMM_output_R2_full_mat_ER_ARD_6state <- corHMM(phy = tree.pruned, data = corhmm_ready.dat, rate.cat = 2, rate.mat =full_mat_ER_ARD_6state, node.states = "marginal", fixed.nodes=FALSE, get.tip.states =TRUE, root.p=c(1,0,0,0,0,0,1,0,0,0,0,0))
+
+
+###########################
+# ER ARD semirestricted
+###########################
+
+### ER ARD
+ER<-matrix(c(
+  0,1,0,0,0,0,
+  1,0,1,1,1,0,
+  1,1,0,1,1,0,
+  0,1,1,0,1,1,
+  0,1,1,1,0,0,
+  0,1,1,1,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+ARD_2<-matrix(c(
+  0,1,0,0,0,0,
+  2,0,3,4,5,0,
+  6,7,0,8,9,0,
+  0,10,11,0,12,13,
+  0,14,15,16,0,0,
+  0,17,18,19,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+StateMats <- list(ER, ARD_2) 
+
+StateMats
+
+RateClassMat <- getRateCatMat(2) 
+
+
+full_mat_ER_ARD_6state_semirestricted<-getFullMat(StateMats, RateClassMat)
+
+
+
+corHMM_output_R2_full_mat_ER_ARD_6state_semirestricted <- corHMM(phy = tree.pruned, data = corhmm_ready.dat, rate.cat = 2, rate.mat =full_mat_ER_ARD_6state_semirestricted, node.states = "marginal", fixed.nodes=FALSE, get.tip.states =TRUE, root.p=c(1,0,0,0,0,0,1,0,0,0,0,0))
+
+
+###########################
+#ARD ARD whole
+##########################
+
+### ARD ARD
+ARD<-matrix(c(
+  0,1,2,3,4,0,
+  5,0,6,7,8,9,
+  10,11,0,12,13,14,
+  15,16,17,0,18,19,
+  20,21,22,23,0,0,
+  0,24,25,26,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+ARD_2<-matrix(c(
+  0,1,2,3,4,0,
+  5,0,6,7,8,9,
+  10,11,0,12,13,14,
+  15,16,17,0,18,19,
+  20,21,22,23,0,0,
+  0,24,25,26,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+StateMats <- list(ARD, ARD_2) 
+
+StateMats
+
+RateClassMat <- getRateCatMat(2) 
+
+
+full_mat_ARD_ARD_6state<-getFullMat(StateMats, RateClassMat)
+
+
+corHMM_output_R2_full_mat_ARD_ARD_6state <- corHMM(phy = tree.pruned, data = corhmm_ready.dat, rate.cat = 2, rate.mat =full_mat_ARD_ARD_6state, node.states = "marginal", fixed.nodes=FALSE, get.tip.states =TRUE, root.p=c(1,0,0,0,0,0,1,0,0,0,0,0))
+
+
+############################
+#ARD ARD semirestricted
+############################
+
+### ARD ARD
+ARD<-matrix(c(
+  0,1,0,0,0,0,
+  2,0,3,4,5,0,
+  6,7,0,8,9,0,
+  0,10,11,0,12,13,
+  0,14,15,16,0,0,
+  0,17,18,19,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+ARD_2<-matrix(c(
+  0,1,0,0,0,0,
+  2,0,3,4,5,0,
+  6,7,0,8,9,0,
+  0,10,11,0,12,13,
+  0,14,15,16,0,0,
+  0,17,18,19,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+StateMats <- list(ARD, ARD_2) 
+
+StateMats
+
+RateClassMat <- getRateCatMat(2) 
+
+
+full_mat_ARD_ARD_6state_semirestricted<-getFullMat(StateMats, RateClassMat)
+
+
+
+corHMM_output_R2_full_mat_ARD_ARD_6state_semirestricted <- corHMM(phy = tree.pruned, data = corhmm_ready.dat, rate.cat = 2, rate.mat =full_mat_ARD_ARD_6state_semirestricted, node.states = "marginal", fixed.nodes=FALSE, get.tip.states =TRUE, root.p=c(1,0,0,0,0,0,1,0,0,0,0,0))
+
+
+
+###########################
+#Stelar ER
+###########################
+
+###stelar theory ER
+stelar_theory<-matrix(c(
+  0,1,0,0,0,0,
+  1,0,1,1,0,0,
+  1,1,0,1,0,0,
+  0,1,1,0,1,1,
+  0,0,0,1,0,0,
+  0,0,0,1,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+
+ER<-matrix(c(
+  0,1,0,0,0,0,
+  1,0,1,1,1,0,
+  1,1,0,1,1,0,
+  0,1,1,0,1,1,
+  0,1,1,1,0,0,
+  0,1,1,1,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+
+StateMats <- list(stelar_theory, ER) 
+
+StateMats
+
+RateClassMat <- getRateCatMat(2) 
+
+
+full_mat_stelar_ER_6state_semirestricted<-getFullMat(StateMats, RateClassMat)
+
+
+
+corHMM_output_R2_full_mat_stelar_ER_6state_semirestricted <- corHMM(phy = tree.pruned, data = corhmm_ready.dat, rate.cat = 2, rate.mat =full_mat_stelar_ER_6state_semirestricted, node.states = "marginal", fixed.nodes=FALSE, get.tip.states =TRUE, root.p=c(1,0,0,0,0,0,1,0,0,0,0,0) )
+
+
+
+
+##################################
+# stelar theory ARD
+##################################
+
+### Stelar ARD
+stelar_theory<-matrix(c(
+  0,1,0,0,0,0,
+  1,0,1,1,0,0,
+  1,1,0,1,0,0,
+  0,1,1,0,1,1,
+  0,0,0,1,0,0,
+  0,0,0,1,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+
+ARD_2<-matrix(c(
+  0,1,0,0,0,0,
+  2,0,3,4,5,0,
+  6,7,0,8,9,0,
+  0,10,11,0,12,13,
+  0,14,15,16,0,0,
+  0,17,18,19,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+StateMats <- list(stelar_theory, ARD_2) 
+
+StateMats
+
+RateClassMat <- getRateCatMat(2) 
+
+
+full_mat_stelar_ARD_6state_semirestricted<-getFullMat(StateMats, RateClassMat)
+
+
+
+corHMM_output_R2_full_mat_stelar_ARD_6state_semirestricted <- corHMM(phy = tree.pruned, data = corhmm_ready.dat, rate.cat = 2, rate.mat =full_mat_stelar_ARD_6state_semirestricted, node.states = "marginal", fixed.nodes=FALSE, get.tip.states =TRUE, root.p=c(1,0,0,0,0,0,1,0,0,0,0,0)  )
+
+
+
+##################################
+# stelar theory with two rate classes
+##################################
+
+### Stelar stelar
+stelar_theory<-matrix(c(
+  0,1,0,0,0,0,
+  1,0,1,1,0,0,
+  1,1,0,1,0,0,
+  0,1,1,0,1,1,
+  0,0,0,1,0,0,
+  0,0,0,1,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+
+stelar_theory_2<-matrix(c(
+  0,1,0,0,0,0,
+  2,0,3,4,0,0,
+  5,6,0,7,0,0,
+  0,8,9,0,10,11,
+  0,0,0,12,0,0,
+  0,0,0,13,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+
+StateMats <- list(stelar_theory, stelar_theory_2) 
+
+StateMats
+
+RateClassMat <- getRateCatMat(2) 
+
+
+full_mat_stelar_stelar_6state_semirestricted<-getFullMat(StateMats, RateClassMat)
+
+
+
+corHMM_output_R2_full_mat_stelar_stelar_6state_semirestricted <- corHMM(phy = tree.pruned, data = corhmm_ready.dat, rate.cat = 2, rate.mat =full_mat_stelar_stelar_6state_semirestricted, node.states = "marginal", fixed.nodes=FALSE, get.tip.states =TRUE, root.p=c(1,0,0,0,0,0,1,0,0,0,0,0)  )
+
+
+##################
+#Compare all the corhmm models
+##################
+
+
+###estimate AIC values
+aic<-c(corHMM_output_R2_full_mat_ARD_ARD_6state_semirestricted$AICc, 
+       corHMM_output_R2_full_mat_ARD_ARD_6state$AICc,
+       corHMM_output_R2_full_mat_ER_ARD_6state_semirestricted$AICc,
+       corHMM_output_R2_full_mat_ER_ARD_6state$AICc,
+       corHMM_output_R2_full_mat_ER_ER_6state_semirestricted$AICc,
+       corHMM_output_R2_full_mat_ER_ER_6state$AICc, 
+       corHMM_output_R2_full_mat_stelar_stelar_6state_semirestricted$AICc,
+       corHMM_output_R2_full_mat_SYM_SYM_6state_semirestricted$AICc,
+       corHMM_output_R2_full_mat_SYM_SYM_6state$AICc)
+
+model.fit<-data.frame(model=c("corHMM_output_R2_full_mat_ARD_ARD_6state_semirestricted", 
+                              "corHMM_output_R2_full_mat_ARD_ARD_6state",
+                              "corHMM_output_R2_full_mat_ER_ARD_6state_semirestricted",
+                              "corHMM_output_R2_full_mat_ER_ARD_6state",
+                              "corHMM_output_R2_full_mat_ER_ER_6state_semirestricted",
+                              "corHMM_output_R2_full_mat_ER_ER_6state", 
+                              "corHMM_output_R2_full_mat_stelar_stelar_6state_semirestricted",
+                              "corHMM_output_R2_full_mat_SYM_SYM_6state_semirestricted",
+                              "corHMM_output_R2_full_mat_SYM_SYM_6state"
+                              
+                              
+),
+logL=c(corHMM_output_R2_full_mat_ARD_ARD_6state_semirestricted$loglik, 
+       corHMM_output_R2_full_mat_ARD_ARD_6state$loglik,
+       corHMM_output_R2_full_mat_ER_ARD_6state_semirestricted$loglik,
+       corHMM_output_R2_full_mat_ER_ARD_6state$loglik,
+       corHMM_output_R2_full_mat_ER_ER_6state_semirestricted$loglik,
+       corHMM_output_R2_full_mat_ER_ER_6state$loglik, 
+       corHMM_output_R2_full_mat_stelar_stelar_6state_semirestricted$loglik,
+       corHMM_output_R2_full_mat_SYM_SYM_6state_semirestricted$loglik,
+       corHMM_output_R2_full_mat_SYM_SYM_6state$loglik),
+AIC=aic,delta.AIC=aic-min(aic))
+
+
+model.fit<- model.fit%>%
+  arrange(delta.AIC)
+
+
+##################
+#Compare all the corhmm and geiger models together
+##################
+
+
+
+aic<-c(AIC(fitard.unord.more.rate_6state),
+       AIC(SYM.unordered_6state),
+       AIC(ard.unordered_6state),
+       AIC(er.unordered_6state),
+       AIC(fitard.ard.unord.even.more.rate_6state),
+       AIC(fitArd.ord_6state),
+       AIC(fitsym.trans.ordered_6state),
+       AIC(fitsym.trans.more_6state),
+       AIC(fit_ard_best_fit_mat_6state), 
+       corHMM_output_R2_full_mat_ARD_ARD_6state_semirestricted$AICc, 
+       corHMM_output_R2_full_mat_ARD_ARD_6state$AICc,
+       corHMM_output_R2_full_mat_ER_ARD_6state_semirestricted$AICc,
+       corHMM_output_R2_full_mat_ER_ARD_6state$AICc,
+       corHMM_output_R2_full_mat_ER_ER_6state_semirestricted$AICc,
+       corHMM_output_R2_full_mat_ER_ER_6state$AICc, 
+       corHMM_output_R2_full_mat_stelar_stelar_6state_semirestricted$AICc,
+       corHMM_output_R2_full_mat_SYM_SYM_6state_semirestricted$AICc,
+       corHMM_output_R2_full_mat_SYM_SYM_6state$AICc)
+
+
+
+model.fit<-data.frame(model=c("fitard.unord.more.rate_6state",
+                              "SYM.unordered_6state",
+                              "ard.unordered_6state",
+                              "er.unordered_6state",
+                              "fitard.ard.unord.even.more.rate_6state",
+                              "fitArd.ord_6state",
+                              "fitsym.trans.ordered_6state",
+                              "fitsym.trans.more_6state",
+                              "fit_ard_best_fit_mat_6state", 
+                              "corHMM_output_R2_full_mat_ARD_ARD_6state_semirestricted", 
+                              "corHMM_output_R2_full_mat_ARD_ARD_6state",
+                              "corHMM_output_R2_full_mat_ER_ARD_6state_semirestricted",
+                              "corHMM_output_R2_full_mat_ER_ARD_6state",
+                              "corHMM_output_R2_full_mat_ER_ER_6state_semirestricted",
+                              "corHMM_output_R2_full_mat_ER_ER_6state", 
+                              "corHMM_output_R2_full_mat_stelar_stelar_6state_semirestricted",
+                              "corHMM_output_R2_full_mat_SYM_SYM_6state_semirestricted",
+                              "corHMM_output_R2_full_mat_SYM_SYM_6state"),
+                      
+                      logL=c(logLik(fitard.unord.more.rate_6state),
+                             logLik(SYM.unordered_6state),
+                             logLik(ard.unordered_6state),
+                             logLik(er.unordered_6state),
+                             logLik(fitard.ard.unord.even.more.rate_6state),
+                             logLik(fitArd.ord_6state),
+                             logLik(fitsym.trans.ordered_6state),
+                             logLik(fitsym.trans.more_6state),
+                             logLik(fit_ard_best_fit_mat_6state), 
+                             corHMM_output_R2_full_mat_ARD_ARD_6state_semirestricted$loglik, 
+                             corHMM_output_R2_full_mat_ARD_ARD_6state$loglik,
+                             corHMM_output_R2_full_mat_ER_ARD_6state_semirestricted$loglik,
+                             corHMM_output_R2_full_mat_ER_ARD_6state$loglik,
+                             corHMM_output_R2_full_mat_ER_ER_6state_semirestricted$loglik,
+                             corHMM_output_R2_full_mat_ER_ER_6state$loglik, 
+                             corHMM_output_R2_full_mat_stelar_stelar_6state_semirestricted$loglik,
+                             corHMM_output_R2_full_mat_SYM_SYM_6state_semirestricted$loglik,
+                             corHMM_output_R2_full_mat_SYM_SYM_6state$loglik),
+                      AIC=aic,delta.AIC=aic-min(aic))
+
+
+model.fit<- model.fit%>%
+  arrange(delta.AIC)
+
+
+
+###########################              ########################### 
+########################### NEXT Section ###########################
+###########################              ########################### 
+
+### This portion of the script adds fossil tip states to the nodes for ancestral character state reconstruction
+
+#########
+# Read in data
+#########
+fern.data<- read.csv("stele_data.csv", header = TRUE)
+
+
+# Select column on stelar morphology reduced
+stele.data<- fern.data%>%
+  dplyr::select(HC_reduced_states)%>%
+  na.omit()
+
+# Check the number of states
+chk.stele<- unique(stele.data$HC_reduced_states)
+
+# Change the names in state names from specific architectures to to A B C D E
+stele.data$HC_reduced_states<- str_replace_all(stele.data$HC_reduced_states, "Protostele", "A")
+
+stele.data$HC_reduced_states<- str_replace_all(stele.data$HC_reduced_states, "Solenostele", "B")
+
+stele.data$HC_reduced_states<- str_replace_all(stele.data$HC_reduced_states, "SolenoDictyostele", "C")
+
+stele.data$HC_reduced_states<- str_replace_all(stele.data$HC_reduced_states, "Dictyostele", "D")
+
+stele.data$HC_reduced_states<- str_replace_all(stele.data$HC_reduced_states, "Polycyclic", "E")
+
+stele.data$HC_reduced_states<- str_replace_all(stele.data$HC_reduced_states, "Perforated_dictyostele", "F")
+
+
+# Order the states in alphabetical order by A-E
+stele.data<- stele.data[order(stele.data$HC_reduced_states),  ,drop=FALSE]
+
+
+#############
+## read tree
+#############
+fern.tree<-read.tree("4k_tree.tre")
+
+
+##############
+## Calibrate node state with fossilized taxa by adding tips to specific nodes
+#############
+
+## Find the node that corresponds with the most recent common ancestor (MRCA) of all Equisetum 
+equistum_node<-getMRCA(fern.tree, tip =c("Equisetum_myriochaetum","Equisetum_bogotense"))
+
+## Extract this node and plot it to make sure its correct, this can be repeated for each fossil as needed
+equistum_clade.tre<-extract.clade(fern.tree,equistum_node)
+
+plotTree(equistum_clade.tre,ftype="i",cex=0.6, fsize=0.5, node.numbers=T, offset=1) 
+
+## Add extinct species Hamatophyton_verticillatum to the MRCA of Equisetum 
+Tree.fossils<-bind.tip(fern.tree,tip.label = "Hamatophyton_verticillatum" , edge.length=0, where=equistum_node, position=0)
+
+
+## Find the node that corresponds with the most recent common ancestor (MRCA) of all Osmunda 
+osmunda_node<-getMRCA(Tree.fossils, tip =c("Leptopteris_fraseri","Osmunda_lancea"))
+
+# Add extinct species Korsarod_osmunda to the MRCA of Osmunda 
+Tree.fossils<-bind.tip(Tree.fossils,tip.label = "Korsarod_osmunda" , edge.length=0, where=osmunda_node, position=0)
+
+
+## Find the node that corresponds with the most recent common ancestor (MRCA) of all Gleicheniaceae
+stromatopteris_node<-getMRCA(Tree.fossils, tip =c("Stromatopteris_moniliformis","Gleichenia_alpina"))
+
+
+## Add extinct species Boodlepteris_turoniana to the MRCA of Gleicheniaceae 
+Tree.fossils<-bind.tip(Tree.fossils,tip.label = "Boodlepteris_turoniana" , edge.length=0, where=stromatopteris_node, position=0)
+
+
+## Find the node that corresponds with the most recent common ancestor (MRCA) of all Gleichenia
+Gleichenia_node<-getMRCA(Tree.fossils, tip =c("Gleichenia_polypodioides","Gleichenia_alpina"))
+
+## Add extinct species Gleichenia_appianensis to the MRCA of Gleichenia
+Tree.fossils<-bind.tip(Tree.fossils,tip.label = "Gleichenia_appianensis" , edge.length=0, where=Gleichenia_node, position=0)
+
+## Find the node that corresponds with the most recent common ancestor (MRCA) of all Dennstaedtia
+Dennsteadtia_node<-getMRCA(Tree.fossils, tip =c("Dennstaedtia_scabra","Dennstaedtia_hirsuta"))
+
+
+## Add extinct species Dennstaedtia_aerenchymata to the MRCA of Dennstaedtia
+Tree.fossils<-bind.tip(Tree.fossils,tip.label = "Dennstaedtia_aerenchymata" , edge.length=0, where=Dennsteadtia_node, position=0)
+
+
+## Find the node that corresponds with the most recent common ancestor (MRCA) of all filicales
+FILICALES_node<-getMRCA(Tree.fossils, tip =c("Osmunda_lancea","Hymenophyllopsis_dejecta"))
+
+
+## Add extinct species Botryopteris_tridentata to the MRCA of filicales
+Tree.fossils<-bind.tip(Tree.fossils,tip.label = "Botryopteris_tridentata" , edge.length=0, where=FILICALES_node, position=0)
+
+
+## Find the node that corresponds with the most recent common ancestor (MRCA) of all Dicksoniaceae
+Dicksoniaceae_node<-getMRCA(Tree.fossils, tip =c("Dicksonia_fibrosia","Lophosoria_quadripinnata"))
+
+
+## Add extinct species Rickwoodopteris_hirsuta to the MRCA of Dicksoniaceae 
+Tree.fossils<-bind.tip(Tree.fossils,tip.label = "Rickwoodopteris_hirsuta" , edge.length=0, where=Dicksoniaceae_node, position=0)
+
+
+## Find the node that corresponds with the most recent common ancestor (MRCA) of all Acrostichum
+Acrostichum_node<-getMRCA(Tree.fossils, tip =c("Acrostichum_aureum","Acrostichum_danaeifolium"))
+
+
+## Add extinct species Acrostichum_intertrappeum to the MRCA of Acrostichum 
+Tree.fossils<-bind.tip(Tree.fossils,tip.label = "Acrostichum_intertrappeum" , edge.length=0, where=Acrostichum_node, position=0)
+
+
+## Find the node that corresponds with the most recent common ancestor (MRCA) of all Marattiales
+Marattiales_node<-getMRCA(Tree.fossils, tip =c("Ptisana_squamosa","Danaea_trifoliata"))
+
+
+## Add extinct species Psaronius_sp to the MRCA of Marattiales 
+Tree.fossils<-bind.tip(Tree.fossils,tip.label = "Psaronius_sp" , edge.length=0, where=Marattiales_node, position=0)
+
+
+## Find the node that corresponds with the most recent common ancestor (MRCA) of all Euphyllophytes
+Euphyllophyte_node<-getMRCA(Tree.fossils, tip =c("Equisetum_myriochaetum","Poa_trivialis"))
+
+
+## Add extinct species Psilophyton_dawsonii to the MRCA of Euphyllophytes 
+Tree.fossils<-bind.tip(Tree.fossils,tip.label = "Psilophyton_dawsonii" , edge.length=0, where=Euphyllophyte_node, position=0)
+
+
+## Find the node that corresponds with the most recent common ancestor (MRCA) of Anemia subgenus anemorhiza
+Anemorhiza_node<-getMRCA(Tree.fossils, tip =c("Anemia_cicutaria","Anemia_mexicana"))
+
+
+## Add extinct species Anemia_quatsinoensis to the MRCA of anemorhiza 
+
+Tree.fossils<-bind.tip(Tree.fossils,tip.label = "Anemia_quatsinoensis" , edge.length=0, where=Anemorhiza_node, position=0)
+
+
+# write the new fossil included tree
+
+setwd("directory")
+
+write.tree(Tree.fossils, "4kTree_with_fossils.tre")
+
+
+
+###########################              ########################### 
+########################### NEXT Section ###########################
+###########################              ########################### 
+
+fern.stele.dat<- read.csv("stele_data.csv", header = TRUE, stringsAsFactors = FALSE, row.names = 1)
+
+
+recon_dat<-fern.stele.dat%>%
+  dplyr::select("HC_reduced_states")%>%
+  na.omit()
+
+
+############
+#read in tree
+############
+fern.tre <- read.tree("4k_tree_with_fossils.tre")
+
+
+############
+# check species in tree
+############
+chk<-name.check(fern.tre,recon_dat)# this is a crazy awesome and useful function
+summary(chk)
+
+############
+#check which are in data nand not tree
+############
+chk$data_not_tree
+
+############
+# now prune the tre based on the data available
+############
+tree.pruned<-drop.tip(fern.tre,chk$tree_not_data)
+
+### Use the best fitting model from the model selection section
+data = corHMM_output_R2_full_mat_ER_ARD_6state_semirestricted$data
+tip.states = corHMM_output_R2_full_mat_ER_ARD_6state_semirestricted$tip.states
+
+
+model = corHMM_output_R2_full_mat_ER_ARD_6state_semirestricted$solution
+model[is.na(model)] <- 0
+diag(model) <- -rowSums(model)
+
+#Change model column names
+phy= corHMM_output_R2_full_mat_ER_ARD_6state_semirestricted$phy
+
+states = corHMM_output_R2_full_mat_ER_ARD_6state_semirestricted$states
+
+
+# run in phytools
+colnames(model)<- c("1", "2", "3", "4", "5", "6" , "7", "8", "9", "10", "11", "12")
+rownames(model)<-c("1", "2", "3", "4", "5", "6" , "7", "8", "9", "10", "11", "12")
+
+colnames(tip.states)<-c("1", "2", "3", "4", "5", "6" , "7", "8", "9", "10", "11", "12")
+
+
+phytools_simmap<-make.simmap(tree =tree.pruned, x =tip.states,  Q= model,  nsim = 1000, burnin=20000 , pi= c(1, 0,0,0,0,0, 1,0,0,0,0,0))
+
+
+###########################              ########################### 
+########################### NEXT Section ###########################
+###########################              ########################### 
+
+
+
+####Drop the fossil tips from the phylogeny for plotting
+k=0
+for(k in 1:length(phytools_simmap)){
+  phytools_simmap[[k]]<-drop.tip.simmap(phytools_simmap[[k]] ,tip = c("Anemia_quatsinoensis", "Psilophyton_dawsonii", "Psaronius_sp", "Acrostichum_intertrappeum", "Rickwoodopteris_hirsuta", "Botryopteris_tridentata", "Dennstaedtia_aerenchymata", "Gleichenia_appianensis", "Boodlepteris_turoniana", "Korsarod_osmunda", "Hamatophyton_verticillatum"))
+}
+
+
+
+####################
+# Drop all the nodes that have a node state with a posterior probability of 1 
+####################
+
+###Summarise the simmaps
+pd<-describe.simmap(phytools_simmap ,plot=FALSE)
+
+pd.filter <- pd[which(!pd$ace ==1)]
+
+head(pd$ace)
+pd$ace[1,] >= 1.00
+
+a <- c()
+
+for (i in 1:length(pd$ace[,1])) {
+  if (any(pd$ace[i,] ==1.00)) {
+    a <- c(a, i)
+  }  
+  
+} 
+
+pd.test <- pd$ace[-a,]
+
+
+size <- rep(0.2, length(pd$ace[,1]))
+
+size[a] <- 0
+
+view(pd$ace)
+
+### Set colors for states, do not descriminate between rate category 1 or 2
+
+cols<-setNames(c("darkblue" ,"navajowhite4"  ,    "green4" ,   "goldenrod"     ,  "purple"  ,     "maroon" ,"navajowhite4"  ,     "green4"   , "goldenrod"    , "darkblue"   ,    "purple"  ,   "maroon"), c("1", "10", "11", "12", "2","3", "4", "5", "6" , "7", "8", "9"))
+
+### plotSimmap chose a randomd simmap
+phytools::plotSimmap(phytools_simmap[[800]] , fsize = 0.5, ftype = "off", type="fan", colors = cols, lwd=0.7, outline=FALSE)
+
+
+setEnv=TRUE 
+
+
+#################################
+# Add arc labels
+#################################
+
+# first make a list with each family and all the species that are in that family
+
+fern.data<- read.csv("stele_data.csv", header = TRUE)
+
+###select only data on stelar morphology reduced
+stele.data<- fern.data%>%
+  dplyr::filter(!is.na(HC_reduced_states))
+
+rownames(stele.data) <- stele.data[,1]
+
+# Use fossil tree from above and then drop tips
+fern.tree<-drop.tip(fern.tre ,tip = c("Anemia_quatsinoensis", "Psilophyton_dawsonii", "Psaronius_sp", "Acrostichum_intertrappeum", "Rickwoodopteris_hirsuta", "Botryopteris_tridentata", "Dennstaedtia_aerenchymata", "Gleichenia_appianensis", "Boodlepteris_turoniana", "Korsarod_osmunda", "Hamatophyton_verticillatum"))
+
+
+# check species in tree
+chk<-name.check(fern.tree,stele.data)
+summary(chk)
+
+#check which are in data nand not tree
+chk$data_not_tree
+
+# now prune the tre based on the data available
+
+tree.pruned<-drop.tip(fern.tree,chk$tree_not_data)
+fern.Data.pruned<-stele.data[!(rownames(stele.data)%in%
+                                 chk$data_not_tree),,drop=FALSE]
+
+stele.mode<-setNames(fern.Data.pruned[,21],rownames(fern.Data.pruned))
+
+
+Species_order_list<-fern.Data.pruned%>%
+  dplyr::select(Species, Order, Family,Clade_3_for_arcs )%>%
+  na.omit()
+
+
+order_list<- unique(Species_order_list$Clade_3_for_arcs)
+
+
+#### Set colors for the arcs
+mycolors<- c("deepskyblue3","darkorange2",  "coral3", "forestgreen" , "navyblue", "black" , "pink2", "goldenrod2", "violetred", "red3", "burlywood4", "darkorchid3", "purple", "cyan")
+
+for (i in 1:length(order_list)){
+  
+  sub<- fern.Data.pruned[fern.Data.pruned$Clade_3_for_arcs==order_list[i],]
+  
+  A<- sub%>%
+    dplyr::select(Species)%>%
+    na.omit() 
+  
+  A<- as.character(A$Species)
+  
+  arc.cladelabels(text=paste(order_list[i], sep=""), node=findMRCA(phytools_simmap[[800]], c(A)), col =mycolors[i],  mark.node=FALSE ,lwd=4, offset= 1, orientation = "vertical")
+  
+  
+}
+
+
+### Add simmap legend
+add.simmap.legend(leg=c("Protostele", "Solenostele","Solenodictyostele", "Dictyostele", "Polycyclic", "Perforated"), colors=cols,prompt=FALSE, x=-650, y=-200, fsize=0.8)
+
+###Node labels
+par(fg="transparent")
+
+nodelabels(node = as.numeric(row.names(pd.test)), pie=pd.test, piecol = cols, cex=0.095, frame = "none")
+
+
+###add tip labels
+X<-setNames(as.character(stele.mode),as.character(names(stele.mode)))
+pies<-matrix(0,Ntip(phytools_simmap[[800]]),6,dimnames=list(phytools_simmap[[800]]$tip.label,c("Protostele", "Solenostele","SolenoDictyostele", "Dictyostele", "Polycyclic", "Perforated_dictyostele")))
+
+
+for(i in 1:Ntip(phytools_simmap[[800]])){ 
+  pies[phytools_simmap[[800]]$tip.label[i], X[[phytools_simmap[[800]]$tip.label[i]]]] <- rep(1/length(X[[phytools_simmap[[800]]$tip.label[i]]]), length(X[[phytools_simmap[[800]]$tip.label[i]]]))
+}
+
+cols_1<-setNames(c("darkblue" , "purple", "maroon","navajowhite4", "green4", "goldenrod"), c("Protostele", "Solenostele" ,"SolenoDictyostele","Dictyostele" , "Polycyclic", "Perforated_dictyostele"))
+
+tiplabels(pie=pies, piecol= cols_1, cex=0.02, frame = "none", offset = 1)
+
+
+#################################
+# plot rates showing R1 and R2
+#################################
+
+add.simmap.legend(leg=c("Protostele", "Solenostele","Soleno-dictyostele", "Dictyostele", "Polycyclic", "Perforated"), colors=cols,prompt=FALSE,x=-650, y=-125, fsize=0.8)
+
+# R1 vs R2 coloring
+
+#R1
+mycolors<-setNames(c("red", "red","red", "red", "red","red", "gray",  "gray", "gray", "gray", "gray","gray"), c("1", "2", "3", "4", "5", "6" , "7", "8", "9", "10", "11", "12"))
+phytools::plotSimmap(phytools_simmap[[800]] , fsize = 0.5, ftype = "off", type="fan", colors = mycolors, lwd=0.7, outline=FALSE)
+
+
+#R2
+mycolors<-setNames(c("gray", "gray", "gray", "gray", "gray","gray", "red","red", "red","red", "red", "red"), c("1", "2", "3", "4", "5", "6" , "7", "8", "9", "10", "11", "12"))
+phytools::plotSimmap(phytools_simmap[[800]] , fsize = 0.5, ftype = "off", type="fan", colors = mycolors, lwd=0.7, outline=FALSE)
+
+#R1 and R2
+mycolors<-setNames(c("navyblue", "navyblue", "navyblue", "navyblue", "navyblue","navyblue", "red2","red2", "red2","red2", "red2", "red2"), c("1", "2", "3", "4", "5", "6" , "7", "8", "9", "10", "11", "12"))
+phytools::plotSimmap(phytools_simmap[[800]] , fsize = 0.5, ftype = "off", type="fan", colors = mycolors, lwd=0.7, outline=FALSE)
+
+
+###########################              ########################### 
+########################### NEXT Section ###########################
+###########################              ########################### 
+
+### This next section calculates the rate of change (or phenotypic evolution) through time
+
+### Drop all of the lycophytes and the fossils from the simmaps
+k=0
+for(k in 1:length(phytools_simmap)){
+phytools_simmap[[k]]<-drop.tip.simmap(phytools_simmap[[k]] ,tip = c("Anemia_quatsinoensis", "Psilophyton_dawsonii", "Psaronius_sp", "Acrostichum_intertrappeum", "Rickwoodopteris_hirsuta", "Botryopteris_tridentata", "Dennstaedtia_aerenchymata", "Gleichenia_appianensis", "Boodlepteris_turoniana", "Korsarod_osmunda", "Hamatophyton_verticillatum", "Isoetes_flaccida", "Selaginella_lepidophylla", "Selaginella_selaginoides"))
+}
+
+
+###take all the trees and calculat the number of changes through time.
+object_no_lyco<-ctt(phytools_simmap)
+object
+
+
+### Use the Q matrix from the stochastic character mapping in the previous section 
+
+Q<-phytools_simmap[[1]]$Q
+Q
+
+colnames(Q)<- c("A", "B", "C", "D", "E", "F" , "G", "H", "I", "J", "K", "L")
+rownames(Q)<-c("A", "B", "C", "D", "E", "F" , "G", "H", "I", "J", "K", "L")
+
+
+
+###Then simulate the rate of chagne through time 
+
+#bring in the 4k tree without fossils
+fern.tree <- read.tree("4k_tree.tre")
+
+###Drop the lycophyte outgroups
+fern.tree<-drop.tip(fern.tree, c("Isoetes_flaccida", "Selaginella_lepidophylla", "Selaginella_selaginoides"))
+
+###Bring in dataframe
+fern.data <- read.csv("stele_data.csv",header = TRUE, row.names=1)
+
+
+###Select only data on stelar morphology reduced
+stele.data<- fern.data%>%
+select(HC_reduced_states)%>%
+na.omit()
+
+
+#check species in tree
+chk<-name.check(fern.tree,stele.data)# this is a crazy awesome and useful function
+
+
+# now prune the tre based on the data available
+tree.pruned<-drop.tip(fern.tree,chk$tree_not_data)
+fern.Data.pruned<-stele.data[!(rownames(stele.data)%in%
+chk$data_not_tree),,drop=FALSE]
+
+### Simulate the null hypothesis
+nulo_1ksims_no_lycos_15feb<-sim.multiCtt(tree.pruned ,Q ,nsims=1000)
+
+
+
+###make changes through time plot for the null and empirical data and the LTT plot overlaid
+
+###drop the lycophytes
+tree.pruned<-drop.tip(phytools_simmap[[1]], c("Isoetes_flaccida", "Selaginella_lepidophylla", "Selaginella_selaginoides"))
+
+#plot Lineage through time plot ontop of CTT map.
+tree.pruned<-force.ultrametric(tree.pruned) # needs to be ultrametric, this is just an rounding issue because the tree is already ultrmetric.
+
+### calculate lineages through time
+obj_ltt<-ltt(pd.pruned, log.lineages = FALSE)
+
+# With 1k sims
+plot(nulo_1ksims_no_lycos_15feb,alpha=0.2, lwd=3 ,col="red",ylim=c(0,0.03))
+plot(object_no_lyco,add=TRUE, lwd=3)
+
+plot(obj_ltt, log.lineages=TRUE, mar=par()$mar, lwd=3, xaxis="flipped")
+
+plotTree(pd.pruned,add=TRUE,ftype="off",lwd=1.25, color=make.transparent("blue", 0.2), mar=par()$mar,direction="rightwords")
+
+
+###########################              ########################### 
+########################### NEXT Section ###########################
+###########################              ########################### 
+
+### This next section uses the threshold model to calculate the relationship between rhizome diameter and pith presence. 
+
+
+###bring in the stele dataframe
+data <- read.csv("stele_data.csv",header = TRUE)
+
+
+###subset the data to just have pith and rhizome size
+GLMM.df <- data %>%
+  mutate(species=Species)%>%
+  filter(!is.na(rhizome_diamter_mm), .preserve = T)%>%
+  filter(!is.na(pith_1_no_pith_0), .preserve = T)%>%
+  dplyr::select(species, rhizome_diamter_mm, pith_1_no_pith_0)
+
+
+###make a list of speices in df
+sp.df <- GLMM.df%>%
+  dplyr::select(species) %>%
+  as.data.frame(.,stringsAsFactors=FALSE)
+
+
+###make the list a character vector
+sp.list <- as.character(sp.df[,1])
+
+###read in tree
+fern.tree <- read.tree(file = "4k_tree.tre")
+
+###pull out tip labels from tree and ensure only the tips in tree are the ones in the df
+tree.tips <- fern.tree$tip.label
+
+###remove all rows in df that are not in the tree.tips
+filt.df <- sp.list[match(tree.tips, sp.list)]
+
+###remove nas
+filt.df<- filt.df%>%
+  na.omit()
+
+###make a tree that has the tips of only the species in the glm data set type
+tip_tree <- drop.tip(fern.tree, fern.tree$tip.label[-match(filt.df,fern.tree$tip.label)])
+
+
+###make a list of species in tree in their order
+tip_Tree_order <- as.data.frame(tip_tree$tip.label)%>%
+  mutate(species = tip_tree$tip.label)%>%
+  dplyr::select(species)
+
+####make a df of only species in the tip tree and arrange the species in the data frame by the arrangement of species in the tree
+pith_ord.df <- left_join(tip_Tree_order, GLMM.df, by="species")
+
+###log transform all of the rhizome_diameter
+pith_ord_log.df<- pith_ord.df%>%
+  mutate(log_rhiz_diam_mm = log10(rhizome_diamter_mm))%>%
+  mutate(pith_1_no_pith_0 = as.numeric(pith_1_no_pith_0))%>%
+  dplyr::select(species, pith_1_no_pith_0, log_rhiz_diam_mm)
+
+###now make rownames the species names
+pith_ord_log.df <- data.frame(pith_ord_log.df$log_rhiz_diam_mm,pith_ord_log.df$pith_1_no_pith_0, row.names = pith_ord_log.df$species)
+
+
+###run threshold model
+## set some parameters for the MCMC
+sample<-500
+ngen<-10000000
+burnin<-0.2*ngen
+
+####we can start by running our Bayesian MCMC on the original data
+fit.thresh_chain1<- threshBayes(tip_tree,pith_ord_log.df, types = c("continuous", "discrete"),ncores=20,plot=FALSE, ngen=ngen,control=list(sample=sample))
+
+fit.thresh_chain2<- threshBayes(tip_tree,pith_ord_log.df, types = c("continuous", "discrete"),ncores=20,plot=FALSE, ngen=ngen,control=list(sample=sample))
+
+fit.thresh_chain3<- threshBayes(tip_tree,pith_ord_log.df, types = c("continuous", "discrete"),ncores=20,plot=FALSE, ngen=ngen,control=list(sample=sample))
+
+fit.thresh_chain4<- threshBayes(tip_tree,pith_ord_log.df, types = c("continuous", "discrete"),ncores=20,plot=FALSE, ngen=ngen,control=list(sample=sample))
+
+
+
+####merge chains using runjags
+r2.postburnin.Chains<- c(fit.thresh_chain1$par$r[4000:20001],fit.thresh_chain2$par$r[4000:20001], fit.thresh_chain3$par$r[4000:20001], fit.thresh_chain4$par$r[4000:20001])
+
+
+###get the postburnin mean of the r value
+mean(r2.postburnin.Chains)
+
+
+###merge the log likelihoo chains
+logL.postburnin.Chains<- c(fit.thresh_chain3$par$logL[4000:20001],fit.thresh_chain1$par$logL[4000:20001],fit.thresh_chain2$par$logL[4000:20001],fit.thresh_chain4$par$logL[4000:20001])
+
+
+#### plot our likelihood profile of all 4 chains
+plot(logL.postburnin.Chains, type="l",  xlab="generation",ylab="logL")
+
+
+###Get r2 postburnin with the good chains
+r2.trimpostburnin.Chains<- c(fit.thresh_chain1$par$r[4000:20001],fit.thresh_chain2$par$r[4000:20001], fit.thresh_chain3$par$r[4000:20001], fit.thresh_chain4$par$r[4000:20001])
+
+mean(r2.trimpostburnin.Chains)
+
+
+###merge all the data to use in downstream analyes
+merged.threshdat<-cbind(fit.thresh_chain1$par,fit.thresh_chain2$par, fit.thresh_chain3$par, fit.thresh_chain4$par)
+
+
+###here is our "post burnin" mean from the posterior sample check on one run
+mean(fit.thresh_chain5$par[4000:nrow(fit.thresh_chain5$par),"r"])
+
+###here is our mean "post burnin" value of r from the posterior sample check on all runs
+mean(r2.postburnin.Chains)
+
+### plot our likelihood profile of one chain
+plot(fit.thresh_chain1$par[,"gen"],fit.thresh_chain1$par[,"logL"],type="l",
+     xlab="generation",ylab="logL")
+
+
+### plot our posterior density for the correlation
+plot(density(merged.threshdat$r,bw=0.1),xlab="r",main="posterior density for r")
+
+
+###########################
+# Make a plot that is just colored by pith or not pith
+###########################
+
+# data for plotting logged
+plot_dat<- pith_ord.df%>%
+  mutate(log_rhiz_diam_mm = log10(rhizome_diamter_mm))%>%
+  mutate(pith_1_no_pith_0 = as.numeric(pith_1_no_pith_0))%>%
+  dplyr::select(species, pith_1_no_pith_0, log_rhiz_diam_mm, Clade_2, Clade )
+
+### plot
+  plot_dat%>%
+    ggplot(aes(x= log_rhiz_diam_mm, y=pith_1_no_pith_0 ))+geom_jitter(aes(color = as.character(pith_1_no_pith_0) ), size=2.5, alpha=0.8) + xlab("log(rhizome diameter)") + ylab("Stelar medullation")+labs(color = "Clade")+ geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) + ggtitle("Rhizome diameter as a predictor of stelar medullation") + annotate("text", x =-0.3 , y = 1.5, label = "Threshbayes post burnin mean r: 0.92", size=6)  +theme_minimal()+  scale_color_manual(values = c("goldenrod", "blue")) + theme(text = element_text(size=20))+ theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+
+####make boxplots of rhizome diameter by different clades
+
+
+###remove saccoloma and salvinia for this...
+plot_dat_2<- plot_dat%>%
+  filter(!Clade_2== "Saccolomatineae", .preserve = TRUE)%>%
+  filter(!Clade_2== "Salviniales", .preserve = TRUE)
+
+mycolors<- c("deepskyblue3", "coral3","darkorange2","forestgreen" , "navyblue", "black" , "pink2", "goldenrod2", "violetred", "red3", "burlywood4", "darkorchid3")
+
+setwd("/Users/jacobsuissa/Documents/1_Dissertation_Work/1_Dissertation_project/Stelar_evolution_Ch.1/Manuscript/Figures_to_use/Original_R_figs/Rhiz_by_pith_clades/")
+
+pdf(file = paste("rhiz_diam_boxplots_by_clade.pdf",sep=""), width = 14, height = 10)
+
+print(ggplot(plot_dat_2, aes(y= log_rhiz_diam_mm, x=reorder(Clade, -log_rhiz_diam_mm )),  fill=Clade )+geom_jitter(aes(color =Clade ), size=2.5, alpha=0.8) + geom_boxplot(outlier.colour = NA,show.legend = FALSE, alpha=0.4)+ theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+ guides(fill=FALSE)+ guides(color=FALSE)+  scale_color_manual(values = mycolors) + xlab("Clade") + ylab("Log(rhizome diameter (mm))")+labs(color = "Clade")
+)
+dev.off()
+
+###########################              ########################### 
+########################### NEXT Section ###########################
+###########################              ########################### 
+
+# This next section tests for phylogenetic signal.
+
+
+####Test for phylogenetic signal following  Winchell et al., 2020 https://onlinelibrary.wiley.com/doi/full/10.1111/evo.13947?casa_token=LvErbPa_mAoAAAAA%3ACDg2xU15GyU3kDZFuPnHGZ4CtHyxOog6xAIhJ4XYq067bRUxcVTTFqbN5pC5PkcetEXRZAJ_Axb_rg
+
+
+############
+#read in dat
+############
+fern.stele_sig.dat<- read.csv("stele_data.csv", header = TRUE, stringsAsFactors = FALSE, row.names = 1)
+
+###Subset the data
+fern.stele_sig.dat<- fern.stele_sig.dat%>%
+  dplyr::select(HC_reduced_states)%>%
+  na.omit()
+
+####subset the data so it just contains the taxa in the tree
+fern.tree <- read.tree("4k_tree.tre")
+
+# check species in tree
+chk<-name.check(fern.tree,fern.stele_sig.dat)
+summary(chk)
+
+#check which are in data nand not tree
+chk$data_not_tree
+
+# now prune the tre based on the data available
+tree.pruned<-drop.tip(fern.tree,chk$tree_not_data)
+fern.stele_sig.dat.pruned<-fern.stele_sig.dat[!(rownames(fern.stele_sig.dat)%in%
+                                                  chk$data_not_tree),,drop=FALSE]
+
+dat_1<-rownames_to_column(fern.stele_sig.dat.pruned, "species")
+
+matched_data <- dat_1[order(match(dat_1$species, tree.pruned$tip.label)),]
+
+stele.mode_phy_sig<-setNames(matched_data[,2], as.character(matched_data[,1]) )
+
+
+
+### use best fitting single rate q matrix
+
+ARD_2<-matrix(c(
+  0,1,2,3,4,0,
+  5,0,6,7,8,9,
+  10,11,0,12,13,14,
+  15,16,17,0,18,19,
+  20,21,22,23,0,0,
+  0,24,25,26,0,0
+),6,6,byrow=TRUE,
+dimnames=list(0:5,0:5))
+
+
+
+###Test for phylogenetic signal in best model
+lk.lambda<-function(lambda,tree,x,...) 
+  -logLik(fitMk(phytools:::lambdaTree(tree,lambda),
+                x,...))
+opt<-optimize(lk.lambda,c(0,phytools:::maxLambda(tree.pruned)),tree=tree.pruned,
+              x=stele.mode_phy_sig,model=ARD_2)
+
+###opt
+lam<-opt$minimum
+
+fit.lambda<-fitMk(phytools:::lambdaTree(tree.pruned,lam),stele.mode_phy_sig,model=ARD_2)
+
+
+fit.h0<-fitMk(phytools:::lambdaTree(tree.pruned,0),stele.mode_phy_sig,model=ARD_2)
+
+LR<- - 2*(logLik(fit.h0)-logLik(fit.lambda))
+
+P.chisq<-pchisq(LR, df=1, lower.tail=FALSE)
+
+P.chisq
+
+
+###########################              ########################### 
+########################### NEXT Section ###########################
+###########################              ########################### 
+
+### This next section maps the climatic distribution of stelar sectoriality.
+
+#############
+# Climate mapping
+#############
+
+
+#############
+# run an OLS of sectoriality by mean annual precip
+#############
+
+Sectoriality_Stele.dat1.4<- read.csv("sectoriality_data.csv")
+
+  
+ggplot(Sectoriality_Stele.dat1.4, aes(x=mean_mean_annual_precip , y=sectoriality ))+ geom_point(aes(color=HC_stele_state),size=2, alpha= 0.8) + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"))+ theme(axis.text.x = element_text(angle = 90))+ theme(text = element_text(size=16)) + xlab("Mean annual precipitation (mm)")+ylab("Sectoriality index")+ geom_smooth(method="lm", color="red")+   stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~"))) + scale_color_manual(values=c("navajowhite4", "goldenrod",  "green4","darkblue", "purple")) + 
+    geom_errorbarh(aes(xmin=mean_mean_annual_precip-stderr_MAP, xmax=mean_mean_annual_precip+stderr_MAP), width=.1,position=position_dodge(0.05))+guides(size=FALSE)  
+
+
+#################
+### Conduct the same regression as above but use PIC
+#################
+###subset the data
+PIC_test_dat_1<- Sectoriality_Stele.dat1.4%>%
+  dplyr::filter(!is.na(PIC_test_dat$mean_mean_annual_precip), .preserve = TRUE)%>%
+  dplyr::filter(!is.na(sectoriality),.preserve = TRUE)%>%
+  distinct(correct.species.names,.keep_all = TRUE)%>%
+  column_to_rownames(var = "correct.species.names")
+
+### Read in the tree
+tree <- read.tree("4k_tree.tre")
+
+# check species in tree
+chk<-name.check(tree,PIC_test_dat_1)# this is a crazy awesome and useful function
+summary(chk)
+
+#check which are in data nand not tree
+chk$data_not_tree
+
+# now prune the tre based on the data available
+
+tree.pruned<-drop.tip(tree,chk$tree_not_data)
+fern.Data.pruned<-PIC_test_dat_1[!(rownames(PIC_test_dat_1)%in%
+                                     chk$data_not_tree),,drop=FALSE]
+
+# now lets run the pic
+sectoriality_dat<-setNames(fern.Data.pruned[,"sectoriality"],
+                           rownames(fern.Data.pruned))
+mean_annual_precip<-setNames(fern.Data.pruned[,"mean_mean_annual_precip"],
+                             rownames(fern.Data.pruned))
+
+
+pic.sect<-pic(sectoriality_dat, tree.pruned)
+pic.MAP<-pic(mean_annual_precip,tree.pruned)
+
+
+head(pic.sect,n=20)
+
+fit.pic<-lm(pic.sect~pic.MAP+0)
+fit.pic
+
+summary(fit.pic)
+
+
+pdf(file = "PIC_Sectoriality_by_MAP_mm.pdf", width = 15, height = 10)
+par(mar=c(5.1,5.1,2.1,1.1))
+print(
+  plot(pic.MAP,pic.sect,
+       xlab="PICs for Mean annual precipitation (mm)",
+       ylab="PICs for Sectoriality index",
+       pch=21,bg="grey", cex=1.2,las=1,
+       cex.axis=0.8,cex.lab=0.9,bty="l"),
+  abline(h=0,lty="dotted",col="grey"),
+  abline(v=0,lty="dotted",col="grey"),
+  abline(fit.pic,lwd=2,col="blue"),
+  text(x = 0, y = 1, labels = "r^2=0.024, P-value=0.02")
+)
+
+###########################              ########################### 
+########################### NEXT Section ###########################
+###########################              ########################### 
+
+### This next section runs a PGLS on rhiz diam and leaf area
+
+
+
+#read the tree in
+tree<- read.tree(file = "4k_tree.tre")
+
+# read in the total dataset 
+data.fern<-read.csv("stele_data.csv", header = TRUE)
+
+data.rhiz_leaf<- data.fern%>%
+  dplyr::select(Species, rhizome_diamter_mm, Leaf_area_ellipse_mm)%>%
+  na.omit()%>%# remove all NAs
+  mutate(Leaf_area_ellipse_mm= as.numeric(Leaf_area_ellipse_mm))%>%
+  column_to_rownames(var="Species")
+
+
+#####################
+# Run PGLS
+####################
+
+# drop tips without data
+# check names in tree and make sure everthing matches
+# use this funciton to determine if the names are consistent
+chk<-name.check(tree,data.rhiz_leaf)# this is a crazy awesome and useful function
+summary(chk)
+
+#check which are in data nand not tree
+chk$data_not_tree
+
+# now prune the tre based on the data available
+tree.pruned<-drop.tip(tree,chk$tree_not_data)
+fern.Data.pruned<-data.rhiz_leaf[!(rownames(data.rhiz_leaf)%in%
+                                     chk$data_not_tree),,drop=FALSE]
+
+####
+pgls_dat<- fern.Data.pruned%>%
+ rownames_to_column(var = "Species")
+
+
+comp.data<-comparative.data(tree.pruned, pgls_dat, names.col= "Species", vcv.dim=2, warn.dropped=TRUE)
+
+
+modelo4<-pgls(log(rhizome_diamter_mm)~log(Leaf_area_ellipse_mm), data=comp.data, lambda = "ML")
+sum_mod<-summary(modelo4)
+
+plot.pgls(modelo4)
+
+###plot it
+plot(log(comp.data$data$rhizome_diamter_mm)~log(comp.data$data$Leaf_area_ellipse_mm), 
+     #ylab=expression(paste("log(rhizome diameter (mm))")),
+     #xlab=expression(paste("log(Leaf area (mm"^"2","))")),
+     ylim= c(-3, 7), xlim=c(0, 14),
+     pch=21,bg="grey",cex=1.2,las=1,
+     cex.axis=1, cex.lab=1.3, bty="l") 
+abline(a = coef(modelo4)[1], b = coef(modelo4)[2], lwd=2, col="blue")
+#abline(modelo4, lwd=2, col="blue")
+text(x = 12, y = -.75, labels = expression(paste("Y= 0.8211x + 6.4336")), cex = 1)
+text(x = 12, y = -0.5, labels = expression(paste("r"^"2":"0.20 ", " p-value=0.0001")),  cex = 1)
+text(x = 12, y = -1, labels = expression(paste("lambda: 0.94 (95.0% CI:0.912, 0.956)")),  cex = 1) 
