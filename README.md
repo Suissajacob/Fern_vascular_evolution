@@ -3,7 +3,7 @@ Code on fern vascular evolution 2021
 
 This repository contains all the code required to reproduce the results from the manuscrip:
 
-*inut manuscript*
+*input manuscript*
 
 # Contents:
 
