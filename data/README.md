@@ -2,4 +2,11 @@
 
 The excel spreadsheet contains three tabs:
 
-Tab 1: Taxonomic informatin for each species, categorically coded vascular architecture, leaf area (mm2), rhizome diamter (mm), pith presence or absence, and the source for each categorically coded variable.
+# Tab 1: 
+This tab Taxonomic informatin for each species, categorically coded vascular architecture, leaf area (mm2), rhizome diamter (mm), pith presence or absence, and the source for each categorically coded variable.
+
+# Tab 2: 
+This tab contains the information derived from the quantitative image analysis for over 250 species. Each variable is defined in Table S2 of the main text doi:
+
+# Tab 3:
+This tab contains information on the coordinates, mean annual precipitation, and the level of sectoriality for each species vascular architecture (derived from the data in Tab 2). Geographic and climatic data were derived from Suissa _et al., _2021 J. Biogr Doi:_https://doi.org/10.1111/jbi.14076
