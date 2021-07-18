@@ -983,7 +983,7 @@ model.fit<- model.fit%>%
 
 
 ##################
-#Compare all the corhmm and geiger models together
+#Compare all the hidden rate and single rate models together
 ##################
 
 
@@ -1273,35 +1273,9 @@ for(k in 1:length(phytools_simmap)){
 
 
 
-####################
-# Drop all the nodes that have a node state with a posterior probability of 1 
-####################
-
 ###Summarise the simmaps
 pd<-describe.simmap(phytools_simmap ,plot=FALSE)
 
-pd.filter <- pd[which(!pd$ace ==1)]
-
-head(pd$ace)
-pd$ace[1,] >= 1.00
-
-a <- c()
-
-for (i in 1:length(pd$ace[,1])) {
-  if (any(pd$ace[i,] ==1.00)) {
-    a <- c(a, i)
-  }  
-  
-} 
-
-pd.test <- pd$ace[-a,]
-
-
-size <- rep(0.2, length(pd$ace[,1]))
-
-size[a] <- 0
-
-view(pd$ace)
 
 ### Set colors for states, do not descriminate between rate category 1 or 2
 
@@ -1381,7 +1355,7 @@ add.simmap.legend(leg=c("Protostele", "Solenostele","Solenodictyostele", "Dictyo
 ###Node labels
 par(fg="transparent")
 
-nodelabels(node = as.numeric(row.names(pd.test)), pie=pd.test, piecol = cols, cex=0.095, frame = "none")
+nodelabels(node = as.numeric(row.names(pd$ace)), pie=pd$ace, piecol = cols, cex=0.095, frame = "none")
 
 
 ###add tip labels
