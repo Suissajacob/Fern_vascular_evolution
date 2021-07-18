@@ -108,7 +108,7 @@ stele_ppCA<-as.data.frame(scores(stelePhyPCA)[,1:13]) #scores() function may nee
 
 
 # Compute hierarchical clustering on principal components
-res.phcpc <- HCPC(stele_ppCA, graph = FALSE, kk = Inf, nb.clust = -1, iter.max = 100, min=5, max=20, consol = TRUE, graph.scale="inertia", method="ward",metric = "euclidean")
+res.phcpc <- HCPC(stele_ppCA, graph = FALSE, kk = Inf, nb.clust = -1, iter.max = 100, min=3, max=20, consol = TRUE, graph.scale="inertia", method="ward",metric = "euclidean")
 
 ####################
 ###set the colors 
