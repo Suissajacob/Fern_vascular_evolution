@@ -1,7 +1,7 @@
 # Fern_vascular_evolution
 Code on fern vascular evolution 2021
 
-This repository contains all the code required to reproduce the results from the manuscrip:
+This repository contains all the code required to reproduce the results from the manuscript:
 
 https://royalsocietypublishing.org/doi/10.1098/rspb.2021.2209
 
